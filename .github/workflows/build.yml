@@ -121,7 +121,7 @@ jobs:
 
 
       # =====================================================
-      # 7. CREATE CORRECT BUILDOZER SPEC
+      # 7. CREATE BUILDOZER SPEC
       # =====================================================
       - name: Create buildozer.spec
         run: |
@@ -129,6 +129,8 @@ jobs:
           [app]
 
           title = Wingo Smart Predictor
+          icon.filename = %(source.dir)s/icon.png
+
           package.name = wingosmartpredictor
           package.domain = org.wingo
 
@@ -144,8 +146,6 @@ jobs:
 
           # =================================================
           # ANDROID SETTINGS
-          # IMPORTANT:
-          # All android.* settings belong inside [app]
           # =================================================
 
           android.api = 36
@@ -168,7 +168,7 @@ jobs:
 
 
       # =====================================================
-      # 8. VERIFY SPEC
+      # 8. VERIFY PROJECT AND SPEC
       # =====================================================
       - name: Verify project and spec
         run: |
@@ -177,6 +177,15 @@ jobs:
           echo "=========================================="
 
           ls -lah
+
+          echo ""
+          echo "=========================================="
+          echo "ICON CHECK"
+          echo "=========================================="
+
+          test -f icon.png
+
+          echo "icon.png found successfully"
 
           echo ""
           echo "=========================================="
@@ -213,11 +222,7 @@ jobs:
 
 
       # =====================================================
-      # 10. DOWNLOAD / PREPARE SDK + NDK + P4A
-      #
-      # This is important:
-      # It forces Buildozer to prepare Android dependencies
-      # BEFORE the actual APK build.
+      # 10. PREPARE ANDROID TOOLCHAIN
       # =====================================================
       - name: Prepare Android SDK NDK and p4a
         run: |
