@@ -1,0 +1,381 @@
+name: Build Wingo APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+env:
+  PYTHONFORANDROID_PREREQUISITES_INSTALL_INTERACTIVE: "0"
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+
+    steps:
+
+      # =====================================================
+      # 1. CHECKOUT
+      # =====================================================
+      - name: Checkout project
+        uses: actions/checkout@v4
+
+
+      # =====================================================
+      # 2. JAVA 17
+      # =====================================================
+      - name: Setup Java 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+
+
+      # =====================================================
+      # 3. PYTHON 3.14
+      # =====================================================
+      - name: Setup Python 3.14
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+
+
+      # =====================================================
+      # 4. SYSTEM DEPENDENCIES
+      # =====================================================
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+
+          sudo apt-get install -y \
+            build-essential \
+            ccache \
+            git \
+            zip \
+            unzip \
+            openjdk-17-jdk \
+            autoconf \
+            automake \
+            libtool \
+            libltdl-dev \
+            pkg-config \
+            zlib1g-dev \
+            libffi-dev \
+            libssl-dev \
+            libncurses5-dev \
+            libncursesw5-dev \
+            libtinfo5 \
+            cmake \
+            patch \
+            gettext \
+            autopoint \
+            rustc \
+            cargo
+
+
+      # =====================================================
+      # 5. INSTALL BUILDOZER
+      # =====================================================
+      - name: Install Buildozer
+        run: |
+          python --version
+          python -m pip --version
+
+          python -m pip install --upgrade pip
+
+          python -m pip install \
+            setuptools \
+            legacy-cgi \
+            cython==0.29.34
+
+          python -m pip install \
+            "git+https://github.com/kivy/buildozer.git"
+
+
+      # =====================================================
+      # 6. VERIFY TOOLS
+      # =====================================================
+      - name: Verify tools
+        run: |
+          echo "=========================================="
+          echo "PYTHON"
+          echo "=========================================="
+
+          python --version
+          python -m pip --version
+
+          echo ""
+          echo "=========================================="
+          echo "CYTHON"
+          echo "=========================================="
+
+          cython --version
+
+          echo ""
+          echo "=========================================="
+          echo "BUILDOZER"
+          echo "=========================================="
+
+          buildozer --version
+
+
+      # =====================================================
+      # 7. CREATE CORRECT BUILDOZER SPEC
+      # =====================================================
+      - name: Create buildozer.spec
+        run: |
+          cat > buildozer.spec <<'EOF'
+          [app]
+
+          title = Wingo Smart Predictor
+          package.name = wingosmartpredictor
+          package.domain = org.wingo
+
+          source.dir = .
+          source.include_exts = py,png,jpg,jpeg,kv,atlas,json,txt
+
+          version = 1.0
+
+          requirements = python3,kivy
+
+          orientation = portrait
+          fullscreen = 0
+
+          # =================================================
+          # ANDROID SETTINGS
+          # IMPORTANT:
+          # All android.* settings belong inside [app]
+          # =================================================
+
+          android.api = 36
+          android.minapi = 24
+          android.ndk = 29
+          android.ndk_api = 24
+
+          android.archs = arm64-v8a
+
+          android.accept_sdk_license = True
+
+          p4a.branch = develop
+
+
+          [buildozer]
+
+          log_level = 2
+          warn_on_root = 1
+          EOF
+
+
+      # =====================================================
+      # 8. VERIFY SPEC
+      # =====================================================
+      - name: Verify project and spec
+        run: |
+          echo "=========================================="
+          echo "PROJECT FILES"
+          echo "=========================================="
+
+          ls -lah
+
+          echo ""
+          echo "=========================================="
+          echo "MAIN.PY CHECK"
+          echo "=========================================="
+
+          test -f main.py
+
+          python -m py_compile main.py
+
+          echo "main.py syntax: OK"
+
+          echo ""
+          echo "=========================================="
+          echo "BUILDOZER SPEC"
+          echo "=========================================="
+
+          cat buildozer.spec
+
+
+      # =====================================================
+      # 9. CLEAN OLD BUILD
+      # =====================================================
+      - name: Clean Buildozer environment
+        run: |
+          echo "Removing old Buildozer environment..."
+
+          rm -rf .buildozer
+          rm -rf bin
+
+          mkdir -p bin
+
+          echo "Clean complete."
+
+
+      # =====================================================
+      # 10. DOWNLOAD / PREPARE SDK + NDK + P4A
+      #
+      # This is important:
+      # It forces Buildozer to prepare Android dependencies
+      # BEFORE the actual APK build.
+      # =====================================================
+      - name: Prepare Android SDK NDK and p4a
+        run: |
+          echo "=========================================="
+          echo "PREPARING ANDROID TOOLCHAIN"
+          echo "=========================================="
+
+          buildozer android p4a -- --help
+
+
+      # =====================================================
+      # 11. VERIFY SDK / AIDL
+      # =====================================================
+      - name: Verify Android SDK and AIDL
+        run: |
+          echo "=========================================="
+          echo "CHECKING ANDROID SDK"
+          echo "=========================================="
+
+          SDK="$HOME/.buildozer/android/platform/android-sdk"
+
+          echo "SDK PATH:"
+          echo "$SDK"
+
+          echo ""
+          echo "SDK DIRECTORY:"
+          ls -lah "$SDK" || true
+
+          echo ""
+          echo "BUILD TOOLS:"
+          find "$SDK/build-tools" \
+            -maxdepth 2 \
+            -type f \
+            -name "aidl" \
+            -print 2>/dev/null || true
+
+          echo ""
+          echo "AIDL:"
+          AIDL=$(find "$SDK/build-tools" \
+            -type f \
+            -name "aidl" \
+            2>/dev/null | head -1 || true)
+
+          if [ -z "$AIDL" ]; then
+            echo "ERROR: AIDL was NOT found."
+            exit 1
+          fi
+
+          echo "AIDL FOUND:"
+          echo "$AIDL"
+
+          "$AIDL" --version || true
+
+
+      # =====================================================
+      # 12. BUILD APK
+      # =====================================================
+      - name: Build Android APK
+        id: build_apk
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -o pipefail
+
+          export BUILDOZER_WARN_ON_ROOT=1
+
+          echo "=========================================="
+          echo "       STARTING ANDROID APK BUILD"
+          echo "=========================================="
+
+          buildozer -v android debug 2>&1 | tee build.log
+
+          BUILD_EXIT=${PIPESTATUS[0]}
+
+          echo ""
+          echo "=========================================="
+          echo "BUILDOZER EXIT CODE: ${BUILD_EXIT}"
+          echo "=========================================="
+
+          exit ${BUILD_EXIT}
+
+
+      # =====================================================
+      # 13. DETAILED ERROR OUTPUT
+      # =====================================================
+      - name: Print detailed build error
+        if: steps.build_apk.outcome == 'failure'
+        run: |
+          echo "=================================================="
+          echo "             BUILDOZER BUILD FAILED"
+          echo "=================================================="
+
+          echo ""
+          echo "=================================================="
+          echo "LAST 300 LINES"
+          echo "=================================================="
+
+          tail -300 build.log || true
+
+          echo ""
+          echo "=================================================="
+          echo "IMPORTANT ERRORS"
+          echo "=================================================="
+
+          grep -inE \
+            "error:|error |exception|traceback|command failed|failed|fatal|undefined reference|no such file|cannot find|ImportError|Aidl not found|license|SDK|NDK" \
+            build.log | tail -200 || true
+
+          echo ""
+          echo "=================================================="
+          echo "APK DIRECTORY"
+          echo "=================================================="
+
+          ls -lah bin || true
+
+          exit 1
+
+
+      # =====================================================
+      # 14. SUCCESS
+      # =====================================================
+      - name: Show successful build
+        if: steps.build_apk.outcome == 'success'
+        run: |
+          echo "=================================================="
+          echo "             BUILD SUCCESSFUL"
+          echo "=================================================="
+
+          echo ""
+          echo "APK FILES:"
+
+          find bin -type f -name "*.apk" -print
+
+          echo ""
+          echo "BIN DIRECTORY:"
+
+          ls -lah bin
+
+
+      # =====================================================
+      # 15. UPLOAD APK
+      # =====================================================
+      - name: Upload APK
+        if: steps.build_apk.outcome == 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: Wingo-Smart-Predictor-APK
+          path: bin/*.apk
+          if-no-files-found: error
+
+
+      # =====================================================
+      # 16. ALWAYS UPLOAD FULL LOG
+      # =====================================================
+      - name: Upload full build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Wingo-Build-Log
+          path: build.log
+          if-no-files-found: warn
